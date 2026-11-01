@@ -2,6 +2,8 @@
 *{box-sizing:border-box}html,body{height:100%;margin:0;overflow:hidden;background:var(--dk);color:var(--pa);font:15px/1.4 Montserrat,system-ui,Arial,sans-serif;touch-action:manipulation;-webkit-user-select:none;user-select:none}
 #vid,#gl{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;display:block}#vid{z-index:0;background:#000}#gl{z-index:1;pointer-events:none}
 #lbl{position:fixed;inset:0;z-index:2;pointer-events:none;transition:opacity .3s}
+#touch{position:fixed;inset:0;z-index:3;touch-action:none;display:none}body[data-st=guide] #touch{display:block}
+.hint{margin:0;font-size:.76rem;font-weight:600;color:var(--pa);text-shadow:0 1px 3px rgba(0,0,0,.8);text-align:center}
 button{font:inherit;font-size:.82rem;font-weight:600;color:var(--pa);background:rgba(26,34,22,.72);border:1.5px solid rgba(237,228,204,.45);border-radius:4px;padding:.48rem .75rem;cursor:pointer;white-space:nowrap;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
 button.on{background:var(--pa);color:var(--dk);border-color:var(--pa)}button:focus-visible{outline:2px solid var(--or);outline-offset:2px}
 button.primary{background:var(--ol);border-color:var(--ol2);color:var(--pw);font-size:.95rem;padding:.65rem 1.4rem}
@@ -33,13 +35,13 @@ body[data-st=guide] #trackui,body:not([data-st=guide]) #guideui{display:none}
 .card .fine{font-size:.74rem;color:#5d6152;margin:.8rem 0 0}#err{color:var(--rd);font-size:.84rem;font-weight:600;margin:.6rem 0 0}#err:empty{display:none}
 @media(min-width:900px){#dock{align-items:center}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
-</style></head><body><video id="vid" playsinline muted autoplay></video><canvas id="gl"></canvas><div id="lbl"></div>
+</style></head><body><video id="vid" playsinline muted autoplay></video><canvas id="gl"></canvas><div id="touch"></div><div id="lbl"></div>
 <header id="top"><b class="brand">Mandible AR</b><span id="pill" class="pill"></span></header>
-<section id="guideui"><div id="views"><button data-v="fl">Front-left</button><button data-v="f">Front</button><button data-v="fr" class="on">Front-right</button><button data-z="-" aria-label="Smaller outline">−</button><button data-z="+" aria-label="Bigger outline">+</button></div><button id="lock" class="primary">Lock on</button></section>
+<section id="guideui"><div id="views"><button data-v="fl">Front-left</button><button data-v="f">Front</button><button data-v="fr" class="on">Front-right</button><button data-z="-" aria-label="Smaller outline">−</button><button data-z="+" aria-label="Bigger outline">+</button></div><p class="hint">Drag, pinch or twist the outline to fit your print, then hold steady</p><button id="lock" class="primary">Lock on</button></section>
 <section id="dock"><div id="trackui"><button id="realign">Re-align</button><button id="ghost">Ghost</button><button id="hold">Hold still</button></div>
 <div id="info"><div id="ih"><b id="it"></b><span class="chev">▾</span></div><p id="id"></p><p id="ik" class="key"></p></div><div id="subs" hidden></div><div id="modes"></div></section>
 <div id="start"><div class="card"><h1>Mandible AR</h1><p class="sub">Point your phone at your 3D-printed mandible to see growth sites, remodelling and the four theories on the real bone.</p>
-<ol><li>Stand the print on a plain, darker surface in even light.</li><li>Line the print up with the glowing outline. It locks on by itself, or tap <b>Lock on</b>.</li><li>Keep the print still and move the phone around it.</li><li>If it slips, tap <b>Re-align</b>. On a stand, tap <b>Hold still</b>.</li></ol>
+<ol><li>Stand the print on a plain, darker surface in even light.</li><li>Fit the glowing outline to the print: move the phone, or drag, pinch and twist the outline. It turns green and locks on by itself, or tap <b>Lock on</b>.</li><li>Keep the print still and move the phone around it.</li><li>If it slips, tap <b>Re-align</b>. On a stand, tap <b>Hold still</b>.</li></ol>
 <button id="go" class="primary">Start camera</button><p id="err"></p><p class="fine">Works in Safari on iPhone and Chrome on Android. Everything runs on your phone; no video is uploaded.</p></div></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -49,7 +51,7 @@ body[data-st=guide] #trackui,body:not([data-st=guide]) #guideui{display:none}
 // ===== Mandible AR: model-based tracking (guide-view init + optical flow + silhouette edges) =====
 const R=THREE,$=s=>document.querySelector(s),cl=(v,a,b)=>Math.max(a,Math.min(b,v));
 const TEST=location.hash.indexOf('test')>=0;
-const F_RATIO=0.78,PROC=480,NEAR=1,FAR=400;
+const PROC=480,NEAR=1,FAR=400;let FR=.78;try{const v=+localStorage.getItem('mandibleAR_f');if(v>.5&&v<1.1)FR=v}catch(e){}
 // ---------- mesh (same scan as the deck, centimetres) ----------
 const GEOS=[];
 MD.forEach(d=>{const v=new Uint16Array(Uint8Array.from(atob(d.v),c=>c.charCodeAt(0)).buffer),f=new Uint16Array(Uint8Array.from(atob(d.f),c=>c.charCodeAt(0)).buffer),p=new Float32Array(v.length);
@@ -94,10 +96,12 @@ function setGroupPose(g,p){const r=p.R,t=p.t;g.matrix.set(r[0],r[1],r[2],t[0],-r
 let VW=0,VH=0,PW=0,PH=0,KS=1,FP=1,FV=1,CXP=0,CYP=0;
 let rt=null,rbuf=null,ZB=null;
 function setIntrinsics(vw,vh){VW=vw;VH=vh;const lv=Math.max(vw,vh),cap=Math.min(1,1280/lv);rd.setSize(Math.round(vw*cap),Math.round(vh*cap),false);
- KS=PROC/lv;PW=Math.round(vw*KS);PH=Math.round(vh*KS);FP=F_RATIO*Math.max(PW,PH);FV=F_RATIO*lv;CXP=PW/2;CYP=PH/2;
+ KS=PROC/lv;PW=Math.round(vw*KS);PH=Math.round(vh*KS);FP=FR*Math.max(PW,PH);FV=FR*lv;CXP=PW/2;CYP=PH/2;
  cam.fov=2*Math.atan((PH/2)/FP)*180/Math.PI;cam.aspect=PW/PH;cam.updateProjectionMatrix();
  rt&&rt.dispose();rt=new R.WebGLRenderTarget(PW,PH,{minFilter:R.NearestFilter,magFilter:R.NearestFilter,depthBuffer:true});
  rbuf=new Uint8Array(PW*PH*4);ZB=new Float32Array(PW*PH);allocImg();guideChanged()}
+function setFocal(fr){FR=fr;FP=FR*Math.max(PW,PH);FV=FR*Math.max(VW,VH);cam.fov=2*Math.atan((PH/2)/FP)*180/Math.PI;cam.updateProjectionMatrix()}
+function rescalePose(p,f1,f2){const c=mv3(p.R,CENTER);c[0]+=p.t[0];c[1]+=p.t[1];c[2]+=p.t[2];const k=f2/f1,rc=mv3(p.R,CENTER);return{R:p.R.slice(),t:[c[0]*k-rc[0],c[1]*k-rc[1],c[2]*k-rc[2]]}}
 const UF=[255/256/(256*256*256),255/256/(256*256),255/256/256,255/256];
 function renderDepth(p,out){setGroupPose(DG,p);rd.setRenderTarget(rt);rd.setClearColor(0xffffff,1);rd.clear();rd.render(dscene,cam);rd.readRenderTargetPixels(rt,0,0,PW,PH,rbuf);rd.setRenderTarget(null);rd.setClearColor(0x000000,0);
  const Z=out||ZB,a=2*NEAR*FAR,b=FAR+NEAR,c=FAR-NEAR;
@@ -106,11 +110,11 @@ function renderDepth(p,out){setGroupPose(DG,p);rd.setRenderTarget(rt);rd.setClea
 function backproj(u,v,z,p){const xc=[(u+.5-CXP)/FP*z,(v+.5-CYP)/FP*z,z];return mv3(tr3(p.R),[xc[0]-p.t[0],xc[1]-p.t[1],xc[2]-p.t[2]])}
 function proj(p,X){const c=mv3(p.R,X);c[0]+=p.t[0];c[1]+=p.t[1];c[2]+=p.t[2];return[FP*c[0]/c[2]+CXP,FP*c[1]/c[2]+CYP,c[2]]}
 // ---------- image buffers ----------
-let pyrA,pyrB,blur,grayM,status,fbStat;const MAXP=160;
+let pyrA,pyrB,blur,blurH,grayM,status,fbStat;const MAXP=160;
 let XY0=new Float32Array(MAXP*2),XY1=new Float32Array(MAXP*2),XYB=new Float32Array(MAXP*2),P3=new Float32Array(MAXP*3),NP=0;
 const pcv=document.createElement('canvas'),pcx=pcv.getContext('2d',{willReadFrequently:true});
 function allocImg(){pcv.width=PW;pcv.height=PH;pyrA=new jsfeat.pyramid_t(3);pyrB=new jsfeat.pyramid_t(3);pyrA.allocate(PW,PH,jsfeat.U8_t|jsfeat.C1_t);pyrB.allocate(PW,PH,jsfeat.U8_t|jsfeat.C1_t);
- blur=new jsfeat.matrix_t(PW,PH,jsfeat.U8_t|jsfeat.C1_t);status=new Uint8Array(MAXP);fbStat=new Uint8Array(MAXP);NP=0}
+ blur=new jsfeat.matrix_t(PW,PH,jsfeat.U8_t|jsfeat.C1_t);blurH=new jsfeat.matrix_t(PW>>1,PH>>1,jsfeat.U8_t|jsfeat.C1_t);status=new Uint8Array(MAXP);fbStat=new Uint8Array(MAXP);NP=0}
 function loadFrame(src){// src: video element or ImageData
  if(src instanceof ImageData){if(src.width!==PW||src.height!==PH){const t=document.createElement('canvas');t.width=src.width;t.height=src.height;t.getContext('2d').putImageData(src,0,0);pcx.drawImage(t,0,0,PW,PH)}else pcx.putImageData(src,0,0)}
  else pcx.drawImage(src,0,0,PW,PH);
@@ -169,41 +173,71 @@ function chol6(A,b){const L=new Float64Array(36);for(let i=0;i<6;i++)for(let j=0
  const x=new Float64Array(6);for(let i=5;i>=0;i--){let s=y[i];for(let k=i+1;k<6;k++)s-=L[k*6+i]*x[k];x[i]=s/L[i*7]}return x}
 function orthonorm(p){const r=p.R,x=[r[0],r[1],r[2]],y=[r[3],r[4],r[5]];const nx=Math.hypot(...x);x.forEach((v,i)=>x[i]=v/nx);const d=x[0]*y[0]+x[1]*y[1]+x[2]*y[2];y.forEach((v,i)=>y[i]=v-d*x[i]);const ny=Math.hypot(...y);y.forEach((v,i)=>y[i]=v/ny);const z=[x[1]*y[2]-x[2]*y[1],x[2]*y[0]-x[0]*y[2],x[0]*y[1]-x[1]*y[0]];p.R=[...x,...y,...z]}
 // ---------- tracker state machine ----------
-const T={state:'idle',pose:null,guide:null,guideE:null,gscore:0,ghits:0,bad:0,fr:0,kin:0,ein:0,lastLock:0,gdist:1};
+const T={state:'idle',pose:null,guide:null,gbase:null,views:null,guideE:null,gscore:0,gmean:9,ghits:0,bad:0,fr:0,kin:0,ein:0,lastLock:-99,gdist:1};
 const GVIEWS={fr:[.62,.32],f:[0,.22],fl:[-.62,.32]};let GV='fr';
 function guidePose(){const[y,pt]=GVIEWS[GV],D=Math.max(FP*11/(.6*PW),FP*9/(.6*PH))*T.gdist;
  const eye=[CENTER[0]+D*Math.sin(y)*Math.cos(pt),CENTER[1]+D*Math.sin(pt),CENTER[2]+D*Math.cos(y)*Math.cos(pt)];return poseLookAt(eye,CENTER)}
-function guideChanged(){if(!PW)return;T.guide=guidePose();const Z=new Float32Array(PW*PH);renderDepth(T.guide,Z);T.guideE=sampleEdges(Z,T.guide,90);T.ghits=0}
-// ---------- edge distance map + shape search (finds the outline near the guide) ----------
-const NB=6;let DTS=null,GM=null,EB=null;
-function edgeDT(){const g=blur.data,W=PW,H=PH,N=W*H;if(!GM||GM.length!==N){GM=new Float32Array(N);EB=new Int8Array(N);DTS=[];for(let b=0;b<NB;b++)DTS.push(new Float32Array(N))}
- for(let v=1;v<H-1;v++)for(let u=1;u<W-1;u++){const i=v*W+u;GM[i]=Math.abs(g[i+1]-g[i-1])+Math.abs(g[i+W]-g[i-W])}
- EB.fill(-1);
- for(let v=2;v<H-2;v++)for(let u=2;u<W-2;u++){const i=v*W+u,m=GM[i];if(m<16)continue;const gx=g[i+1]-g[i-1],gy=g[i+W]-g[i-W];
+function rotAbout(p,yaw,pitch){// yaw about the jaw's vertical axis, pitch about the camera's horizontal axis, both through the jaw centre
+ const cy=Math.cos(yaw),sy=Math.sin(yaw),Ry=[cy,0,sy,0,1,0,-sy,0,cy],cp=Math.cos(pitch),sp=Math.sin(pitch),Rx=[1,0,0,0,cp,-sp,0,sp,cp];
+ const c=mv3(p.R,CENTER);c[0]+=p.t[0];c[1]+=p.t[1];c[2]+=p.t[2];const R2=mul3(Rx,mul3(p.R,Ry)),rc=mv3(R2,CENTER);return{R:R2,t:[c[0]-rc[0],c[1]-rc[1],c[2]-rc[2]]}}
+function applySim(base,dx,dy,s,r){const c=proj(base,CENTER),Z=c[2]/s,Rz=[Math.cos(r),-Math.sin(r),0,Math.sin(r),Math.cos(r),0,0,0,1],R2=mul3(Rz,base.R);
+ const Xc=[(c[0]+dx-CXP)/FP*Z,(c[1]+dy-CYP)/FP*Z,Z],rc=mv3(R2,CENTER);return{R:R2,t:[Xc[0]-rc[0],Xc[1]-rc[1],Xc[2]-rc[2]]}}
+const VOFF=[[0,0],[-.23,0],[.23,0],[0,-.16],[0,.16],[-.23,-.16],[.23,-.16],[-.23,.16],[.23,.16]];
+function guideChanged(keep){if(!PW)return;if(!keep||!T.gbase)T.gbase=guidePose();T.guide=T.gbase;T.views=VOFF.map(([y,p],k)=>{const v=k?rotAbout(T.gbase,y,p):T.gbase;
+ const Z=new Float32Array(PW*PH);renderDepth(v,Z);const E=sampleEdges(Z,v,80),c=proj(v,CENTER);
+ const P=E.map(e=>{const q=proj(v,e.X);let th=Math.atan2(e.ny,e.nx);if(th<0)th+=Math.PI;return[q[0]-c[0],q[1]-c[1],th]});return{p:v,E,P,pen:k?(k<5?.12:.22):0}});
+ T.guideE=T.views[0].E;T.ghits=0;T.viewsStale=false}
+function guideNudge(dx,dy,s,r){if(!T.gbase)return;T.gbase=applySim(T.gbase,dx,dy,s,r);T.guide=T.gbase;T.ghits=0}
+// ---------- oriented edge distance maps (full and half resolution) + outline search ----------
+const NB=6;const DM={f:null,h:null};
+function edgeDT(img,W,H,key,thr){let o=DM[key];const N=W*H;if(!o||o.N!==N){o=DM[key]={N,W,H,GM:new Float32Array(N),EB:new Int8Array(N),D:[0,1,2,3,4,5].map(()=>new Float32Array(N))}}
+ const g=img,GM=o.GM,EB=o.EB;for(let v=1;v<H-1;v++)for(let u=1;u<W-1;u++){const i=v*W+u;GM[i]=Math.abs(g[i+1]-g[i-1])+Math.abs(g[i+W]-g[i-W])}
+ EB.fill(-1);for(let v=2;v<H-2;v++)for(let u=2;u<W-2;u++){const i=v*W+u,m=GM[i];if(m<thr)continue;const gx=g[i+1]-g[i-1],gy=g[i+W]-g[i-W];
   if(Math.abs(gx)>=Math.abs(gy)?(m>=GM[i-1]&&m>=GM[i+1]):(m>=GM[i-W]&&m>=GM[i+W])){let th=Math.atan2(gy,gx);if(th<0)th+=Math.PI;EB[i]=Math.min(NB-1,(th/(Math.PI/NB))|0)}}
- for(let b=0;b<NB;b++){const D=DTS[b],bl=(b+NB-1)%NB,br=(b+1)%NB;
-  for(let i=0;i<N;i++){const e=EB[i];D[i]=(e===b||e===bl||e===br)?0:1e4}
+ for(let b=0;b<NB;b++){const D=o.D[b],bl=(b+NB-1)%NB,br=(b+1)%NB;for(let i=0;i<N;i++){const e=EB[i];D[i]=(e===b||e===bl||e===br)?0:1e4}
   for(let v=1;v<H;v++)for(let u=1;u<W-1;u++){const i=v*W+u;D[i]=Math.min(D[i],D[i-1]+3,D[i-W]+3,D[i-W-1]+4,D[i-W+1]+4)}
   for(let v=H-2;v>=0;v--)for(let u=W-2;u>=1;u--){const i=v*W+u;D[i]=Math.min(D[i],D[i+1]+3,D[i+W]+3,D[i+W+1]+4,D[i+W-1]+4)}
-  for(let i=0;i<N;i++)D[i]=Math.min(D[i]/3,15)}}
-function shapeSearch(base,E){edgeDT();const c=proj(base,CENTER),cu=c[0],cv=c[1],Z0=c[2];
- const P=E.map(e=>{const q=proj(base,e.X);let th=Math.atan2(e.ny,e.nx);if(th<0)th+=Math.PI;return[q[0]-cu,q[1]-cv,th]});
- const sc=(dx,dy,s,r)=>{const co=Math.cos(r)*s,si=Math.sin(r)*s;let t=0,inl=0;for(const[x,y,th]of P){let a=th+r;a=((a%Math.PI)+Math.PI)%Math.PI;const D=DTS[Math.min(NB-1,(a/(Math.PI/NB))|0)];
-   const u=Math.round(cu+dx+co*x-si*y),v=Math.round(cv+dy+si*x+co*y);const d=(u<0||v<0||u>=PW||v>=PH)?15:D[v*PW+u];t+=d;if(d<=2)inl++}
-  return[t/P.length+.5*Math.hypot(dx,dy)/64+.6*Math.abs(Math.log(s))+.3*Math.abs(r),inl/P.length,t/P.length]};
- let best=[1e9,0,0,0,1,0,0];const R6=Math.PI/30;
- for(const s of[.82,.9,1,1.1,1.22])for(const r of[-2*R6,-R6,0,R6,2*R6])for(let dx=-64;dx<=64;dx+=6)for(let dy=-64;dy<=64;dy+=6){const[m,f,raw]=sc(dx,dy,s,r);if(m<best[0])best=[m,f,dx,dy,s,r,raw]}
- for(let k=0;k<2;k++){const[,,bx,by,bs,br]=best;for(const s of[bs*.97,bs,bs*1.03])for(const r of[br-R6/3,br,br+R6/3])for(let dx=bx-4;dx<=bx+4;dx+=2/(k+1))for(let dy=by-4;dy<=by+4;dy+=2/(k+1)){const[m,f,raw]=sc(dx,dy,s,r);if(m<best[0])best=[m,f,dx,dy,s,r,raw]}}
- const[,f,dx,dy,s,r,raw]=best,Rz=[Math.cos(r),-Math.sin(r),0,Math.sin(r),Math.cos(r),0,0,0,1],R2=mul3(Rz,base.R),Z=Z0/s;
- const Xc=[(cu+dx-CXP)/FP*Z,(cv+dy-CYP)/FP*Z,Z],rc=mv3(R2,CENTER);return{p:{R:R2,t:[Xc[0]-rc[0],Xc[1]-rc[1],Xc[2]-rc[2]]},mean:raw,inl:f}}
+  for(let i=0;i<N;i++)D[i]=Math.min(D[i]/3,15)}return o}
+function scoreSim(o,P,cu,cv,k,dx,dy,s,r,step){const co=Math.cos(r)*s,si=Math.sin(r)*s,W=o.W,H=o.H;let t=0,inl=0,n=0;
+ for(let i=0;i<P.length;i+=step){const[x,y,th]=P[i];let a=th+r;a=((a%Math.PI)+Math.PI)%Math.PI;const D=o.D[Math.min(NB-1,(a/(Math.PI/NB))|0)];
+  const u=Math.round((cu+dx+co*x-si*y)*k),v=Math.round((cv+dy+si*x+co*y)*k);const d=(u<0||v<0||u>=W||v>=H)?15:D[v*W+u]/k;t+=d;if(d<=2)inl++;n++}return[t/n,inl/n]}
+const SCALES=[.74,.81,.89,.97,1.06,1.16,1.27,1.39],ROTS=[-.14,0,.14];
+function coarseView(o,vw,k,c,keep){// fast grid: per (scale,rotation) precompute integer offsets, then slide over positions
+ const P=vw.P,W=o.W,H=o.H,n=Math.ceil(P.length/2),OX=new Int32Array(n),OY=new Int32Array(n),DR=new Array(n),cuk=Math.round(c[0]*k),cvk=Math.round(c[1]*k),R=Math.round(100*k),st=Math.max(1,Math.round(8*k)),res=[];
+ for(const s of SCALES)for(const r of ROTS){const co=Math.cos(r)*s,si=Math.sin(r)*s;
+  for(let i=0,j=0;i<P.length;i+=2,j++){const[x,y,th]=P[i];OX[j]=Math.round((co*x-si*y)*k);OY[j]=Math.round((si*x+co*y)*k);let a=th+r;a=((a%Math.PI)+Math.PI)%Math.PI;DR[j]=o.D[Math.min(NB-1,(a/(Math.PI/NB))|0)]}
+  const pri=.6*Math.abs(Math.log(s))+.3*Math.abs(r)+vw.pen;
+  for(let dy=-R;dy<=R;dy+=st)for(let dx=-R;dx<=R;dx+=st){let t=0;const bu=cuk+dx,bv=cvk+dy;
+   for(let j=0;j<n;j++){const u=bu+OX[j],v=bv+OY[j];t+=(u<0||v<0||u>=W||v>=H)?15*k:DR[j][v*W+u]}
+   const sc=t/n/k+.5*Math.hypot(dx,dy)/R+pri;
+   if(res.length<keep||sc<res[res.length-1][0]){res.push([sc,dx/k,dy/k,s,r]);res.sort((a,b)=>a[0]-b[0]);if(res.length>keep)res.pop()}}}
+ return res}
+function shapeSearch(){const V=T.views;if(!V)return{inl:0,mean:15,p:T.gbase};
+ const oh=edgeDT(blurH.data,PW>>1,PH>>1,'h',12),of=edgeDT(blur.data,PW,PH,'f',14);const cand=[];
+ V.forEach((vw,vi)=>{const c=proj(vw.p,CENTER);coarseView(oh,vw,.5,c,2).forEach(b=>cand.push([b[0],vi,c,b]))});
+ cand.sort((a,b)=>a[0]-b[0]);let out=null;
+ for(const[,vi,c,b]of cand.slice(0,4)){let[ ,bx,by,bs,br]=b;const P=V[vi].P;let bm=null;
+  for(let k=0;k<3;k++){const st=[4,2,1][k],rs=[.045,.022,.011][k];for(const s of[bs*(1-rs),bs,bs*(1+rs)])for(const r of[br-rs,br,br+rs])for(let dx=bx-2*st;dx<=bx+2*st;dx+=st)for(let dy=by-2*st;dy<=by+2*st;dy+=st){
+    const[m,f]=scoreSim(of,P,c[0],c[1],1,dx,dy,s,r,1);const sc=m+V[vi].pen*.5;if(!bm||sc<bm[0])bm=[sc,m,f,dx,dy,s,r]}[,,,bx,by,bs,br]=bm}
+  if(!out||bm[0]<out.sc)out={sc:bm[0],mean:bm[1],inl:bm[2],p:applySim(V[vi].p,bm[3],bm[4],bm[5],bm[6]),view:vi}}
+ return out}
 function lockFrom(p0,r0){const p=clonePose(p0);r0=r0||14;
  for(let it=0;it<10;it++){const Z=renderDepth(p);const E=sampleEdges(Z,p,120);searchEdges(E,p,Math.max(4,r0-it*1.2),10);if(!solve(p,false,E,3,3,3))return null}
  const Z=renderDepth(p),E=sampleEdges(Z,p,120),ratio=searchEdges(E,p,5,10);let m=0,k=0;E.forEach(e=>{if(e.ok){m+=Math.abs(e.s);k++}});
  return{p,ratio,mean:k?m/k:99}}
 function startTracking(p){T.pose=p;T.state='track';T.bad=0;T.probe=0;T.pein=0;NP=0;const Z=renderDepth(p);seedPoints(p,Z,90);status.fill(1);T.lastLock=T.fr;emit()}
-function tryLock(manual,pre){const g=pre||shapeSearch(T.guide,T.guideE);if(!pre&&g.inl<.35){emit(manual?'nolock':null);return false}
- const r=lockFrom(g.p,14);T.lastStats=r&&{ratio:+r.ratio.toFixed(2),mean:+r.mean.toFixed(2),inl:+g.inl.toFixed(2),gm:+g.mean.toFixed(2)};T.cand=r&&r.p;if(r&&r.ratio>.7&&r.mean<1.5){startTracking(r.p);return true}emit(manual?'nolock':null);return false}
-function realign(){T.state='guide';T.pose=null;NP=0;T.ghits=0;emit()}
+const goodLock=(r,manual)=>r&&(manual?(r.ratio>.72&&r.mean<1.6):(r.ratio>.75&&r.mean<1.45));
+const matchQ=g=>g&&g.inl?cl(g.inl*cl((3-g.mean)/1.8,0,1),0,1):0;
+function tryLock(manual,pre){if(!pre)jsfeat.imgproc.gaussian_blur(pyrA.data[1],blurH,3,0);const g=pre||shapeSearch();T.gscore=matchQ(g);if(g.inl<(manual?.35:.5)){emit(manual?'nolock':null);return false}
+ // try the current lens setting first, then other phone-camera zoom levels
+ const f0=FR;let best=null;
+ for(const f of[f0,...[.66,.78,.92].filter(x=>Math.abs(x-f0)>.05)]){if(f!==FR)setFocal(f);
+  const r=lockFrom(f===f0?g.p:rescalePose(g.p,f0,f),14);if(r){r.f=f;if(!best||r.mean-r.ratio<best.mean-best.ratio)best=r}
+  if(f===f0&&r&&r.ratio>.75&&r.mean<1.3)break}
+ T.lastStats=best&&{ratio:+best.ratio.toFixed(2),mean:+best.mean.toFixed(2),inl:+g.inl.toFixed(2),gm:+g.mean.toFixed(2),f:best.f};T.cand=best&&best.p;
+ if(goodLock(best,manual)){if(best.f!==FR)setFocal(best.f);if(best.f!==f0){try{localStorage.setItem('mandibleAR_f',best.f)}catch(e){}T.viewsStale=true}startTracking(best.p);return true}
+ if(FR!==f0)setFocal(f0);emit(manual?'nolock':null);return false}
+function realign(){T.state='guide';T.pose=null;NP=0;T.ghits=0;if(T.viewsStale)guideChanged(true);emit()}
 function trackStep(){const p=T.pose;
  // 1. optical flow with forward-backward check
  if(NP){jsfeat.optical_flow_lk.track(pyrB,pyrA,XY1,XY0,NP,15,20,status,.01,.0005);
@@ -222,14 +256,14 @@ function trackStep(){const p=T.pose;
  T.kin=kin;T.ein=E.length?ein/E.length:0;
  if(T.probe<12){T.probe++;T.pein+=T.ein;if(T.probe===12&&T.pein/12<.55){realign();emit('lost');return}}
  const good=T.ein>.45||(kin>=20&&T.ein>.35);T.bad=good?0:T.bad+1;
- if(T.bad>=6&&T.bad%6===0){const r=lockFrom(p,12);if(r&&r.ratio>.7&&r.mean<1.5){T.pose=r.p;NP=0;seedPoints(r.p,renderDepth(r.p),90);status.fill(1);T.bad=0;return}}
+ if(T.bad>=6&&T.bad%6===0){const r=lockFrom(p,12);if(goodLock(r,false)){T.pose=r.p;NP=0;seedPoints(r.p,renderDepth(r.p),90);status.fill(1);T.bad=0;return}}
  if(T.bad>24){realign();emit('lost');return}
  // 4. top up feature points
  if(NP<70&&T.fr%3===0){Z=renderDepth(p);seedPoints(p,Z,90-NP)}
  T.dbgE=E}
-function guideStep(){if(!T.guideE||T.fr%4)return;const g=shapeSearch(T.guide,T.guideE);T.gscore=g.inl;
- const near=T.gprev&&Math.hypot(g.p.t[0]-T.gprev.t[0],g.p.t[1]-T.gprev.t[1])<1;T.gprev=g.p;
- if(g.inl>.6&&g.mean<2.5){if(near&&++T.ghits>=2&&T.fr-T.lastLock>12){T.lastLock=T.fr;T.ghits=0;tryLock(false,g)}}else T.ghits=0}
+function guideStep(){if(!T.views||T.fr%5)return;jsfeat.imgproc.gaussian_blur(pyrA.data[1],blurH,3,0);const g=shapeSearch();T.gscore=matchQ(g);T.gmean=g.mean;
+ const near=T.gprev&&Math.hypot(g.p.t[0]-T.gprev.t[0],g.p.t[1]-T.gprev.t[1])<1.2;T.gprev=g.p;
+ if(g.inl>.55&&g.mean<2.3){if(near&&++T.ghits>=2&&T.fr-T.lastLock>15){T.lastLock=T.fr;T.ghits=0;tryLock(false,g)}}else T.ghits=0}
 function process(src){loadFrame(src);T.fr++;
  if(T.state==='guide')guideStep();else if(T.state==='track')trackStep();}
 let LISTENERS=[];function emit(ev){LISTENERS.forEach(f=>f(T.state,ev))}
@@ -305,13 +339,16 @@ function smoothPose(p){tm.set(p.R[0],p.R[1],p.R[2],0,p.R[3],p.R[4],p.R[5],0,p.R[
  tm.makeRotationFromQuaternion(SQ);const e=tm.elements;return{R:[e[0],e[4],e[8],e[1],e[5],e[9],e[2],e[6],e[10]],t:[ST.x,ST.y,ST.z]}}
 // ---------- UI state ----------
 let HOLD=false,SHOWG=false;
+let MSG='',MSGT=0;
+function guidePill(){const p=$('#pill'),m=Math.round((T.gscore||0)*100);if(performance.now()<MSGT){p.textContent=MSG;return}
+ p.textContent=m>=55?`Match ${m}% · hold steady`:m>=25?`Match ${m}% · nudge the outline onto the print`:'Fit the outline to the print · keep the whole jaw in view'}
 function ui(state,ev){document.body.dataset.st=state;
- const pill=$('#pill');if(state==='guide'){pill.textContent=ev==='lost'?'Lost the print · line it up again':ev==='nolock'?'Not lined up yet · move closer to the outline':'Line up the print with the outline';pill.className='pill g'}
+ const pill=$('#pill');if(state==='guide'){MSG=ev==='lost'?'Lost the print · line it up again':ev==='nolock'?`Not matched yet · fit the outline closer, or step back so the whole jaw is in view`:'';MSGT=MSG?performance.now()+3500:0;pill.className='pill g';guidePill()}
  else if(state==='track'){pill.textContent=HOLD?'Held · tracking paused':'Locked on';pill.className='pill ok';SINIT=false}
  else{pill.textContent='';pill.className='pill'}}
 LISTENERS.push(ui);
 function draw(t){if(!VW)return;const gs=T.state==='guide';GUIDE.visible=gs;MODEL.visible=T.state==='track';
- if(gs){setGroupPose(GUIDE,T.guide);rimMat.uniforms.k.value=.75+.25*Math.sin(t/300);$('#lbl').style.opacity=0}
+ if(gs){setGroupPose(GUIDE,T.guide);rimMat.uniforms.k.value=.75+.25*Math.sin(t/300);const g=cl(((T.gscore||0)-.3)/.45,0,1);rimMat.uniforms.c.value.setRGB(.93-.37*g,.89-.07*g,.8-.38*g);$('#lbl').style.opacity=0;if(t-(draw.lp||0)>300){draw.lp=t;guidePill()}}
  else if(T.state==='track'){const p=smoothPose(T.pose);setGroupPose(MODEL,p);$('#lbl').style.opacity=1;upLabels(p);
   const s=.5+.5*Math.sin(t/160);pul.forEach(m=>m.emissiveIntensity=.2+s);FXG.children.forEach(o=>{if(o.userData.beat)o.scale.setScalar(.8+.35*s)})}
  rd.render(scene,cam)}
@@ -333,9 +370,20 @@ $('#modes').innerHTML=Object.entries(MODES).map(([k,m])=>`<button data-m="${k}">
 $('#subs').innerHTML=Object.entries(TH).map(([k,m])=>`<button data-s="${k}">${m[0]}</button>`).join('');
 $('#modes').onclick=e=>{const b=e.target.closest('button');if(b)setMode(b.dataset.m)};
 $('#subs').onclick=e=>{const b=e.target.closest('button');if(b)setMode('theo',b.dataset.s)};
-$('#views').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.v){GV=b.dataset.v;document.querySelectorAll('#views [data-v]').forEach(x=>x.classList.toggle('on',x===b))}
- if(b.dataset.z)T.gdist=cl(T.gdist*(b.dataset.z==='+'?.9:1.11),.5,2.5);guideChanged()};
-$('#lock').onclick=()=>{if(T.state==='guide')tryLock(true)};
+$('#views').onclick=e=>{const b=e.target.closest('button');if(!b)return;
+ if(b.dataset.v){GV=b.dataset.v;T.gdist=1;document.querySelectorAll('#views [data-v]').forEach(x=>x.classList.toggle('on',x===b));guideChanged(false)}
+ if(b.dataset.z){guideNudge(0,0,b.dataset.z==='+'?1.1:.91,0);guideChanged(true)}};
+$('#lock').onclick=()=>{if(T.state!=='guide')return;MSG='Locking on…';MSGT=performance.now()+5000;guidePill();setTimeout(()=>{MSGT=0;tryLock(true)},40)};
+// drag / pinch / twist the outline onto the print
+const PT=new Map();let G0=null;
+function gstate(){const a=[...PT.values()];if(a.length===1)return{x:a[0].x,y:a[0].y,d:0,a:0};const[p,q]=a;return{x:(p.x+q.x)/2,y:(p.y+q.y)/2,d:Math.hypot(q.x-p.x,q.y-p.y),a:Math.atan2(q.y-p.y,q.x-p.x)}}
+const tl=$('#touch');
+tl.addEventListener('pointerdown',e=>{if(T.state!=='guide')return;tl.setPointerCapture(e.pointerId);PT.set(e.pointerId,{x:e.clientX,y:e.clientY});if(PT.size<=2)G0=gstate()});
+tl.addEventListener('pointermove',e=>{if(!PT.has(e.pointerId)||!G0)return;PT.set(e.pointerId,{x:e.clientX,y:e.clientY});if(PT.size>2)return;const g=gstate(),c=cover(),k=KS/c.s;
+ let s=1,r=0;if(PT.size===2&&G0.d>20&&g.d>20){s=g.d/G0.d;r=g.a-G0.a;if(r>Math.PI)r-=2*Math.PI;if(r<-Math.PI)r+=2*Math.PI}
+ guideNudge((g.x-G0.x)*k,(g.y-G0.y)*k,s,r);G0=g;e.preventDefault()});
+const gEnd=e=>{if(!PT.has(e.pointerId))return;PT.delete(e.pointerId);if(PT.size)G0=gstate();else{G0=null;guideChanged(true)}};
+tl.addEventListener('pointerup',gEnd);tl.addEventListener('pointercancel',gEnd);
 $('#realign').onclick=()=>{HOLD=false;$('#hold').classList.remove('on');realign()};
 $('#hold').onclick=()=>{HOLD=!HOLD;$('#hold').classList.toggle('on',HOLD);ui(T.state)};
 $('#ghost').onclick=()=>{SHOWG=!SHOWG;$('#ghost').classList.toggle('on',SHOWG);GHOST.forEach(m=>m.visible=SHOWG)};
